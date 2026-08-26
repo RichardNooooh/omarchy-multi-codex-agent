@@ -1,8 +1,9 @@
 # Agents
 
 One bar icon and one panel for every AI coding subscription on the machine.
-The panel is strictly a display: it watches the usage records that
-`omarchy-agent-usage-update` writes to `~/.local/state/omarchy/agents/usage/`
+The panel is strictly a display: its plugin-local refresh wrapper runs
+`omarchy-agent-usage-update` and watches the records it writes to
+`~/.local/state/omarchy/agents/usage/`
 and draws whatever appears there. `Panel.qml` owns the bar button and the
 popup; `Main.qml` discovers and watches the records (and handles the optional
 cross-device aggregation); `Agent.qml` is the per-record file watcher.
@@ -39,7 +40,10 @@ its own the first time a scan finds usage. Drop it with
 ## Data
 
 Each agent is one JSON record in `~/.local/state/omarchy/agents/usage/`,
-written by `omarchy-agent-usage-update`. That command runs one
+written by `omarchy-agent-usage-update`. The local `agent-usage-update`
+wrapper forwards the stock flags and provider selections unchanged, then, when
+Codex was selected, adds sanitized multi-account limits to `codex.json`. The
+stock command runs one
 `omarchy-agent-usage-<agent>` collector per agent; the widget invokes it
 on its refresh timer and whenever you ask for a refresh, and picks up any
 record that lands in the directory regardless of who wrote it.
@@ -63,6 +67,17 @@ falls back to local stats only. A non-default Claude directory is honored via
 `~/.fireworks/auth.ini` (which `firectl set-api-key` creates), then the key
 opencode stores in `~/.local/share/opencode/auth.json` when Fireworks is
 signed in there.
+
+### Codex accounts
+
+When `oc-codex-multi-auth` is available, selected Codex refreshes add a card
+per account. Cards show the account label and plan, 5-hour and weekly usage,
+reset countdowns, and additional limits under `Also tracked upstream:`. A
+failed refresh reads `Stale · last updated <timestamp>` when cached limits are
+available (or `Stale` otherwise), followed by its sanitized current error. The wrapper suppresses collector
+and account-lookup output; its exit status still reports stock or postprocess
+failures. `--except codex` and explicit provider lists without `codex` skip the
+account lookup just as they skip the stock Codex collector.
 
 ### Fireworks balance
 

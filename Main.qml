@@ -14,6 +14,7 @@ Item {
 
   readonly property string home: Quickshell.env("HOME") || ""
   readonly property string usageDir: (Quickshell.env("XDG_STATE_HOME") || home + "/.local/state") + "/omarchy/agents/usage"
+  readonly property string updateWrapper: String(Qt.resolvedUrl("agent-usage-update")).replace(/^file:\/\//, "")
 
   // ------------------------------------------------------------- discovery
 
@@ -144,7 +145,7 @@ Item {
   }
 
   function updateCommand(kind, agentIds) {
-    var command = ["omarchy-agent-usage-update"]
+    var command = [root.updateWrapper]
     if (kind === "force") command.push("--force")
     if (kind === "limits") command.push("--limits-only")
     var providers = settings && settings.providers ? settings.providers : {}
@@ -220,7 +221,48 @@ Item {
     return numberValue(p.totalPrompts) > 0 || numberValue(p.totalSessions) > 0
       || numberValue(p.activeDays) > 0 || numberValue(p.todayPrompts) > 0
       || numberValue(p.todaySessions) > 0 || (p.limits && p.limits.length > 0)
+      || (Array.isArray(p.accounts) && p.accounts.length > 0)
       || !!p.balance
+  }
+
+  // The wrapper writes this narrow, sanitized account shape. Do not pass the
+  // stock record's arbitrary fields through to the panel.
+  function codexAccountsValue(raw) {
+    if (!Array.isArray(raw)) return null
+    var accounts = []
+    for (var i = 0; i < raw.length; i++) {
+      var source = raw[i] || {}
+      var limits = []
+      var sourceLimits = Array.isArray(source.limits) ? source.limits : []
+      for (var j = 0; j < sourceLimits.length; j++) {
+        var limit = sourceLimits[j] || {}
+        var minutes = Number(limit.windowMinutes)
+        var used = Number(limit.usedPercent)
+        if ((minutes === 300 || minutes === 10080) && isFinite(used)) {
+          var reset = Number(limit.resetAtMs)
+          limits.push({
+            windowMinutes: minutes,
+            usedPercent: Math.max(0, Math.min(100, used)),
+            resetAtMs: isFinite(reset) && reset > 0 ? reset : null
+          })
+        }
+      }
+      var names = []
+      var sourceNames = Array.isArray(source.additionalLimitNames) ? source.additionalLimitNames : []
+      for (var k = 0; k < sourceNames.length; k++) names.push(String(sourceNames[k] || ""))
+      accounts.push({
+        index: Number(source.index || i),
+        label: String(source.label || "Account " + (i + 1)),
+        planType: String(source.planType || ""),
+        limits: limits,
+        additionalLimitNames: names,
+        lastSuccessAt: String(source.lastSuccessAt || ""),
+        stale: source.stale === true,
+        error: String(source.error || ""),
+        warning: String(source.warning || "")
+      })
+    }
+    return accounts
   }
 
   // A prepaid agent's credit ledger. Like rate limits, the balance is
@@ -254,6 +296,7 @@ Item {
       // Rate limits and balances stay per-account and are never merged
       // across devices.
       limits: Array.isArray(record.limits) ? record.limits : [],
+      accounts: String(record.id) === "codex" ? codexAccountsValue(record.accounts) : null,
       tierLabel: String(record.tierLabel || ""),
       balance: balanceValue(record.balance),
 

@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+
+# Preserve the stock updater's provider selection semantics before enriching
+# the Codex record it writes.
+codex_selected=0
+has_explicit_provider=0
+codex_excluded=0
+arguments=("$@")
+
+while (($#)); do
+  case "$1" in
+    --force|--limits-only)
+      ;;
+    --except)
+      shift
+      [[ ${1:-} == codex ]] && codex_excluded=1
+      ;;
+    *)
+      has_explicit_provider=1
+      [[ $1 == codex ]] && codex_selected=1
+      ;;
+  esac
+  shift
+done
+
+if (( ! has_explicit_provider )); then
+  codex_selected=1
+fi
+(( codex_excluded )) && codex_selected=0
+
+omarchy-agent-usage-update "${arguments[@]}" >/dev/null 2>&1
+stock_status=$?
+
+processor_status=0
+if (( codex_selected )); then
+  state_home=${XDG_STATE_HOME:-"$HOME/.local/state"}
+  script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+  python3 "$script_dir/codex_accounts.py" --record "$state_home/omarchy/agents/usage/codex.json" >/dev/null 2>&1
+  processor_status=$?
+fi
+
+if (( stock_status )); then
+  printf '%s\n' 'agent-usage-update: stock update failed' >&2
+fi
+if (( processor_status )); then
+  printf '%s\n' 'agent-usage-update: Codex account update failed' >&2
+fi
+
+(( stock_status )) && exit "$stock_status"
+exit "$processor_status"

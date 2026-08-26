@@ -44,10 +44,25 @@ Panel {
   // last 10% of the funded credits lights the same alarm.
   readonly property bool balanceAlarming: !!balance && balance.funded > 0
     && balance.remaining / balance.funded <= 0.1
-  readonly property bool alarming: (!!headline && headline.percent >= 0.9) || balanceAlarming
+  readonly property bool alarming: (enrichedCodex(provider) ? codexAccountsAlarming(provider)
+    : (!!headline && headline.percent >= 0.9)) || balanceAlarming
 
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)) }
   function alpha(c, a) { return Qt.rgba(c.r, c.g, c.b, a) }
+
+  function enrichedCodex(p) {
+    return !!p && p.providerId === "codex" && Array.isArray(p.accounts) && p.accounts.length > 0
+  }
+
+  function codexAccountsAlarming(p) {
+    if (!enrichedCodex(p)) return false
+    for (var i = 0; i < p.accounts.length; i++) {
+      var limits = p.accounts[i].limits || []
+      for (var j = 0; j < limits.length; j++)
+        if (Number(limits[j].usedPercent) >= 90) return true
+    }
+    return false
+  }
 
   function selectProvider(index) {
     if (providers.length === 0) return
@@ -180,6 +195,7 @@ Panel {
   // in their own section; the hero just says what this is.
   function heroMeta(p) {
     if (!p) return ""
+    if (enrichedCodex(p)) return p.accounts.length + " account" + (p.accounts.length === 1 ? "" : "s")
     if (String(p.usageStatusText || "") !== "") return p.usageStatusText
     var tier = String(p.tierLabel || "")
     if (tier === "") return "Subscription"
@@ -519,7 +535,7 @@ Panel {
 
           // ---------- Balance / limits ----------
           PanelSeparator {
-            visible: balanceSection.visible || limitsSection.visible
+            visible: balanceSection.visible || limitsSection.visible || codexAccountsSection.visible
             foreground: root.foreground
           }
 
@@ -586,7 +602,7 @@ Panel {
 
           Column {
             id: limitsSection
-            visible: root.limits.length > 0
+            visible: !root.enrichedCodex(root.provider) && root.limits.length > 0
             width: parent.width
             spacing: Style.space(10)
 
@@ -603,6 +619,23 @@ Panel {
                 required property var modelData
                 width: limitsSection.width
                 window: modelData
+              }
+            }
+          }
+
+          Column {
+            id: codexAccountsSection
+            visible: root.enrichedCodex(root.provider)
+            width: parent.width
+            spacing: Style.space(10)
+
+            Repeater {
+              model: root.provider ? root.provider.accounts : []
+
+              CodexAccountCard {
+                required property var modelData
+                width: codexAccountsSection.width
+                account: modelData
               }
             }
           }
@@ -748,6 +781,154 @@ Panel {
       text: {
         var remainingMs = root.resetMsFor(limitRow.window)
         return remainingMs > 0 ? "Resets in " + root.formatDuration(remainingMs) : ""
+      }
+      color: root.dim
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.caption
+    }
+  }
+
+  component CodexAccountCard: BorderSurface {
+    id: accountCard
+    property var account: null
+
+    function coreLimit(minutes) {
+      var limits = account && account.limits ? account.limits : []
+      for (var i = 0; i < limits.length; i++)
+        if (Number(limits[i].windowMinutes) === minutes) return limits[i]
+      return null
+    }
+
+    width: parent.width
+    implicitHeight: accountColumn.implicitHeight + Style.space(20)
+    color: root.alpha(root.foreground, 0.04)
+    borderSpec: Border.flat(root.alpha(root.foreground, 0.16), 1)
+    radius: Style.cornerRadius
+
+    Column {
+      id: accountColumn
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.top: parent.top
+      anchors.margins: Style.space(10)
+      spacing: Style.space(8)
+
+      Item {
+        width: parent.width
+        implicitHeight: Math.max(accountLabel.implicitHeight, accountPlan.implicitHeight)
+
+        Text {
+          id: accountLabel
+          text: accountCard.account ? accountCard.account.label : ""
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+          elide: Text.ElideRight
+          anchors.left: parent.left
+          anchors.right: accountPlan.left
+          anchors.rightMargin: Style.spacing.sm
+          anchors.verticalCenter: parent.verticalCenter
+        }
+
+        Text {
+          id: accountPlan
+          text: accountCard.account ? accountCard.account.planType : ""
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          anchors.right: parent.right
+          anchors.verticalCenter: parent.verticalCenter
+        }
+      }
+
+      CodexAccountLimitRow { width: parent.width; title: "5-hour"; limit: accountCard.coreLimit(300) }
+      CodexAccountLimitRow { width: parent.width; title: "Weekly"; limit: accountCard.coreLimit(10080) }
+
+      Text {
+        visible: accountCard.account && accountCard.account.additionalLimitNames.length > 0
+        width: parent.width
+        text: "Also tracked upstream: " + (accountCard.account ? accountCard.account.additionalLimitNames.join(", ") : "")
+        color: root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+      }
+
+      Text {
+        visible: accountCard.account && (accountCard.account.stale || accountCard.account.error !== "")
+        width: parent.width
+        text: {
+          if (!accountCard.account) return ""
+          var status = accountCard.account.stale
+            ? (accountCard.account.lastSuccessAt !== ""
+              ? "Stale · last updated " + accountCard.account.lastSuccessAt : "Stale") : ""
+          if (accountCard.account.error !== "") status += (status === "" ? "" : " · ") + accountCard.account.error
+          return status
+        }
+        color: root.urgent
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+      }
+
+      Text {
+        visible: accountCard.account && accountCard.account.warning !== ""
+        width: parent.width
+        text: accountCard.account ? accountCard.account.warning : ""
+        color: root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+      }
+    }
+  }
+
+  component CodexAccountLimitRow: Column {
+    id: accountLimitRow
+    property string title: ""
+    property var limit: null
+    readonly property bool alarming: limit && Number(limit.usedPercent) >= 90
+
+    spacing: Style.space(4)
+
+    Item {
+      width: parent.width
+      implicitHeight: Math.max(limitLabel.implicitHeight, limitValue.implicitHeight)
+
+      Text {
+        id: limitLabel
+        text: accountLimitRow.title
+        color: root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.bodySmall
+        anchors.left: parent.left
+        anchors.verticalCenter: parent.verticalCenter
+      }
+
+      Text {
+        id: limitValue
+        text: accountLimitRow.limit ? Math.round(Number(accountLimitRow.limit.usedPercent)) + "%" : "Not reported"
+        color: accountLimitRow.alarming ? root.urgent : root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+      }
+    }
+
+    Meter {
+      visible: !!accountLimitRow.limit
+      width: parent.width
+      value: accountLimitRow.limit ? Number(accountLimitRow.limit.usedPercent) / 100 : -1
+      alarming: accountLimitRow.alarming
+    }
+
+    Text {
+      visible: !!accountLimitRow.limit
+      width: parent.width
+      text: {
+        if (!accountLimitRow.limit || !accountLimitRow.limit.resetAtMs) return "Reset not reported"
+        return "Resets in " + root.formatDuration(Number(accountLimitRow.limit.resetAtMs) - root.nowMs)
       }
       color: root.dim
       font.family: root.fontFamily
