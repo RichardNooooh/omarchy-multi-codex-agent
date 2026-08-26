@@ -35,7 +35,7 @@ shows up at the next refresh, so nothing polls the disk waiting for it.
 That self-hiding is why the widget ships in the default bar layout: a machine
 that has never run an AI coding agent draws nothing, and the icon arrives on
 its own the first time a scan finds usage. Drop it with
-`omarchy plugin disable omarchy.agents`.
+`omarchy plugin disable rnoh.agents`.
 
 ## Data
 
@@ -112,13 +112,13 @@ only adds the meter and the spent-of-funded line under the real figure.
 - Bar icon: left = panel, right = launch agent, middle = next subscription.
 - Panel: `h`/`l` switch subscription, `j`/`k` scroll, `r` or Enter refresh,
   Tab moves to the neighboring bar panel, Esc closes.
-- IPC: `omarchy-shell omarchy.agents <open|close|toggle|refresh|next>`.
+- IPC: `omarchy-shell rnoh.agents <open|close|toggle|refresh|next>`.
 
 ## Settings
 
 Settings live in the widget's entry in `~/.config/omarchy/shell.json`. The
 top-level keys can be set with
-`omarchy bar set omarchy.agents <key> <value>`:
+`omarchy bar set rnoh.agents <key> <value>`:
 
 | Key | Default | What it does |
 |---|---|---|
@@ -131,8 +131,8 @@ top-level keys can be set with
 Numbers need `--json`, or they land in `shell.json` as strings:
 
 ```bash
-omarchy bar set omarchy.agents refreshIntervalSec 300 --json
-omarchy bar set omarchy.agents syncDir '~/Sync/agent-usage'
+omarchy bar set rnoh.agents refreshIntervalSec 300 --json
+omarchy bar set rnoh.agents syncDir '~/Sync/agent-usage'
 ```
 
 Per-agent enablement is nested, and `set` writes its key literally rather
@@ -140,7 +140,7 @@ than walking a dotted path — so pass the whole `providers` object as JSON (or
 edit `shell.json` directly):
 
 ```bash
-omarchy bar set omarchy.agents providers '{
+omarchy bar set rnoh.agents providers '{
   "claude": { "enabled": true },
   "codex": { "enabled": false },
   "fireworks": { "enabled": true }

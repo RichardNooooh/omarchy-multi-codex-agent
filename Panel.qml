@@ -7,8 +7,8 @@ import qs.Ui
 
 Panel {
   id: root
-  moduleName: "omarchy.agents"
-  ipcTarget: "omarchy.agents"
+  moduleName: "rnoh.agents"
+  ipcTarget: "rnoh.agents"
   manageIpc: false
 
   readonly property color foreground: bar ? bar.foreground : Color.foreground

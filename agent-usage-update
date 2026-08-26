@@ -6,6 +6,8 @@ codex_selected=0
 has_explicit_provider=0
 codex_excluded=0
 arguments=("$@")
+explicit_providers=()
+excluded_providers=()
 
 while (($#)); do
   case "$1" in
@@ -13,10 +15,12 @@ while (($#)); do
       ;;
     --except)
       shift
+      excluded_providers+=("${1:-}")
       [[ ${1:-} == codex ]] && codex_excluded=1
       ;;
     *)
       has_explicit_provider=1
+      explicit_providers+=("$1")
       [[ $1 == codex ]] && codex_selected=1
       ;;
   esac
@@ -28,16 +32,70 @@ if (( ! has_explicit_provider )); then
 fi
 (( codex_excluded )) && codex_selected=0
 
-omarchy-agent-usage-update "${arguments[@]}" >/dev/null 2>&1
-stock_status=$?
-
+state_home=${XDG_STATE_HOME:-"$HOME/.local/state"}
+usage_dir="$state_home/omarchy/agents/usage"
+stock_status=0
 processor_status=0
-if (( codex_selected )); then
-  state_home=${XDG_STATE_HOME:-"$HOME/.local/state"}
-  script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-  python3 "$script_dir/codex_accounts.py" --record "$state_home/omarchy/agents/usage/codex.json" >/dev/null 2>&1
-  processor_status=$?
+publication_status=0
+if ! mkdir -p "$usage_dir" 2>/dev/null; then
+  publication_status=1
+else
+  usage_dir=$(CDPATH= cd -- "$usage_dir" 2>/dev/null && pwd -P) || publication_status=1
+  if (( ! publication_status )) && ! { exec 9>"$usage_dir/.agent-usage-update.lock"; flock 9; } 2>/dev/null; then
+    publication_status=1
+  fi
+  if (( ! publication_status )); then
+    stage_root=$(mktemp -d "$usage_dir/.agent-usage-update.XXXXXX" 2>/dev/null) || publication_status=1
+    if (( ! publication_status )); then
+      trap 'rm -rf "$stage_root" 2>/dev/null' EXIT
+      stage_state="$stage_root/state"
+      stage_usage="$stage_state/omarchy/agents/usage"
+      if ! mkdir -p "$stage_usage" 2>/dev/null; then
+        publication_status=1
+      else
+        for record in "$usage_dir"/*.json; do
+          [[ -f $record ]] || continue
+          cp -p "$record" "$stage_usage/${record##*/}" 2>/dev/null || publication_status=1
+        done
+      fi
+    fi
+    if (( ! publication_status )); then
+      XDG_STATE_HOME="$stage_state" omarchy-agent-usage-update "${arguments[@]}" >/dev/null 2>&1
+      stock_status=$?
+
+      if (( codex_selected )); then
+        script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd) || processor_status=1
+        if (( ! processor_status )); then
+          python3 "$script_dir/codex_accounts.py" --record "$stage_usage/codex.json" >/dev/null 2>&1
+          processor_status=$?
+        fi
+      fi
+
+      if (( has_explicit_provider )); then
+        publish_providers=("${explicit_providers[@]}")
+      else
+        publish_providers=()
+        for collector in "$OMARCHY_PATH"/bin/omarchy-agent-usage-*; do
+          [[ -x $collector ]] || continue
+          provider=${collector##*/omarchy-agent-usage-}
+          [[ $provider == update ]] || publish_providers+=("$provider")
+        done
+      fi
+      for provider in "${publish_providers[@]}"; do
+        excluded=0
+        for excluded_provider in "${excluded_providers[@]}"; do
+          [[ $provider == "$excluded_provider" ]] && excluded=1
+        done
+        (( excluded )) && continue
+        [[ -f $stage_usage/$provider.json ]] || continue
+        [[ $provider == codex && $processor_status -ne 0 ]] && continue
+        [[ -f $usage_dir/$provider.json ]] && cmp -s "$stage_usage/$provider.json" "$usage_dir/$provider.json" && continue
+        mv "$stage_usage/$provider.json" "$usage_dir/$provider.json" 2>/dev/null || publication_status=1
+      done
+    fi
+  fi
 fi
+
 
 if (( stock_status )); then
   printf '%s\n' 'agent-usage-update: stock update failed' >&2
@@ -45,6 +103,10 @@ fi
 if (( processor_status )); then
   printf '%s\n' 'agent-usage-update: Codex account update failed' >&2
 fi
+if (( publication_status )); then
+  printf '%s\n' 'agent-usage-update: record publication failed' >&2
+fi
 
 (( stock_status )) && exit "$stock_status"
-exit "$processor_status"
+(( processor_status )) && exit "$processor_status"
+exit "$publication_status"
